@@ -2,76 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
-@keyframes slideInUp {
-  from {
-    opacity: 0;
-    transform: translateY(40px) scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes fadeSlideIn {
-  from {
-    opacity: 0;
-    transform: translateX(-20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-.animate-slideInUp {
-  animation: slideInUp 0.7s ease-out;
-}
-
-.animate-fadeSlideIn {
-  animation: fadeSlideIn 0.5s ease-out;
-}
-
-@keyframes floatSlow {
-  0% {
-    transform: translateY(0px) scale(1);
-  }
-  50% {
-    transform: translateY(-10px) scale(1.02);
-  }
-  100% {
-    transform: translateY(0px) scale(1);
-  }
-}
-
-.animate-floatSlow {
-  animation: floatSlow 6s ease-in-out infinite;
-}
-
-.animate-floatSlow-delayed {
-  animation: floatSlow 7s ease-in-out infinite;
-  animation-delay: 1.2s;
-}
-
-.neon-card {
-  position: relative;
-  overflow: hidden;
-}
-
-.neon-card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: radial-gradient(circle at top, rgba(255,255,255,0.15), transparent 60%);
-  pointer-events: none;
-}
-
-.glow-orb {
-  position: absolute;
-  border-radius: 9999px;
-  filter: blur(80px);
-  animation: floatSlow 12s ease-in-out infinite;
+.app-shell {
+  background:
+    radial-gradient(1200px 700px at 50% -10%, rgba(255, 255, 255, 1) 0%, rgba(243, 244, 246, 1) 55%, rgba(249, 250, 251, 1) 100%),
+    radial-gradient(rgba(17, 24, 39, 0.03) 1px, transparent 1px);
+  background-size: auto, 24px 24px;
+  background-position: 0 0, 0 0;
 }
 
 .scrollhide::-webkit-scrollbar {

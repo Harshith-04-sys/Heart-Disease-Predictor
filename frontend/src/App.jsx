@@ -1,7 +1,12 @@
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import axios from "axios";
+import { useNavigate } from "react-router-dom";
+
+const LandingExperience = lazy(() => import("./components/LandingExperience.jsx"));
 
 function App() {
+  const navigate = useNavigate();
+
   const [patientData, setPatientData] = useState({
     age: "", sex: "", cp: "", trestbps: "", chol: "", fbs: "",
     restecg: "", thalch: "", exang: "", oldpeak: "", slope: "", ca: "", thal: ""
@@ -16,6 +21,18 @@ function App() {
   const [currentStep, setCurrentStep] = useState(0);
   const activeFieldRef = useRef(null);
   const formRef = useRef(null);
+
+  const [showLanding, setShowLanding] = useState(() => {
+    try {
+      return localStorage.getItem("cra_seen_landing") !== "1";
+    } catch {
+      return true;
+    }
+  });
+
+  const goToHeart = () => navigate("/heart");
+  const isHeartSymbol = (value) =>
+    typeof value === "string" && /❤️|💗|💓|💝|🫀|♥/.test(value);
 
   // Field order for progressive flow
   const fieldOrder = ['age', 'sex', 'cp', 'trestbps', 'chol', 'fbs', 'restecg', 'thalch', 'exang', 'oldpeak', 'slope', 'ca', 'thal'];
@@ -193,8 +210,32 @@ function App() {
     oldpeak: { min: 0, max: 10, step: 0.1 }
   };
 
+  const fieldLabels = {
+    age: "Age (years)",
+    sex: "Biological sex",
+    cp: "Chest pain type",
+    trestbps: "Resting blood pressure (mm Hg)",
+    chol: "Cholesterol (mg/dL)",
+    fbs: "Fasting blood sugar",
+    restecg: "Resting ECG",
+    thalch: "Max heart rate",
+    exang: "Exercise-induced angina",
+    oldpeak: "ST depression",
+    slope: "ST slope",
+    ca: "Major vessels (0–3)",
+    thal: "Thalassemia"
+  };
+
   // Calculate completion percentage
   const completionPercentage = (completedFields.size / totalFields) * 100;
+
+  const progressHint = useMemo(() => {
+    if (completionPercentage < 10) return "You’re just getting started";
+    if (completionPercentage < 40) return "Great pace — keep going";
+    if (completionPercentage < 70) return "You’re over halfway";
+    if (completionPercentage < 100) return "Almost there";
+    return "Ready to analyze";
+  }, [completionPercentage]);
 
   const formatPercentage = (value) => {
     if (value === null || value === undefined || isNaN(value)) {
@@ -203,14 +244,27 @@ function App() {
     return Number(value).toFixed(2);
   };
 
-  const handleScrollToForm = () => {
-    formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
+  const hasValue = (value) => value !== "" && value !== null && value !== undefined;
 
-  const focusActiveField = () => {
-    if (activeFieldRef.current) {
-      activeFieldRef.current.focus();
+  const getMicroFeedback = (fieldName) => {
+    const rawValue = patientData[fieldName];
+    if (!hasValue(rawValue)) return null;
+
+    const constraint = fieldConstraints[fieldName];
+    if (constraint) {
+      const numericValue = Number(rawValue);
+      if (Number.isNaN(numericValue)) {
+        return { tone: "warn", label: "⚠ Please enter a number" };
+      }
+      if (
+        (constraint.min !== undefined && numericValue < constraint.min) ||
+        (constraint.max !== undefined && numericValue > constraint.max)
+      ) {
+        return { tone: "warn", label: "⚠ Outside expected range" };
+      }
     }
+
+    return { tone: "good", label: "✓ Looks good" };
   };
 
   useEffect(() => {
@@ -269,8 +323,17 @@ function App() {
   const updateField = (e) => {
     const { name, value } = e.target;
     setFieldValue(name, value);
-    
-    // No auto-progression - user must click Next button
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (completedFields.has(currentField) && currentFieldIndex < fieldOrder.length - 1) {
+        navigateToStep(currentFieldIndex + 1);
+      } else if (completionPercentage === 100) {
+        submitPrediction(e);
+      }
+    }
   };
 
   const submitPrediction = async (e) => {
@@ -323,23 +386,6 @@ function App() {
     setCurrentStep(0);
   };
 
-  const Particles = () => (
-    <div className="fixed inset-0 pointer-events-none overflow-hidden">
-      {[...Array(20)].map((_, i) => (
-        <div
-          key={i}
-          className="absolute w-2 h-2 bg-gradient-to-r from-blue-400 to-purple-400 rounded-full opacity-30 animate-pulse"
-          style={{
-            left: `${Math.random() * 100}%`,
-            top: `${Math.random() * 100}%`,
-            animationDelay: `${Math.random() * 5}s`,
-            animationDuration: `${3 + Math.random() * 4}s`
-          }}
-        />
-      ))}
-    </div>
-  );
-
   const renderField = (field) => {
     const isCompleted = completedFields.has(field);
     const isActive = activeField === field;
@@ -351,10 +397,11 @@ function App() {
       : null;
 
     const fieldClass = `
-      w-full px-4 py-3 bg-gray-900/50 border-2 rounded-xl transition-all duration-300 backdrop-blur-sm
-      ${isActive ? 'border-cyan-400 shadow-lg shadow-cyan-400/20 scale-105' : 
-        isCompleted ? 'border-green-400 shadow-lg shadow-green-400/20' : 'border-gray-600 hover:border-gray-500'}
-      text-white placeholder-gray-400 focus:outline-none
+      w-full px-8 py-7 text-3xl bg-white border-2 rounded-2xl shadow-inner
+      ${isActive ? 'border-blue-600 ring-4 ring-blue-100' : 
+        isCompleted ? 'border-green-500' : 'border-gray-300'}
+      text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-100
+      font-normal cursor-text min-h-[92px]
     `;
 
     const handleFieldFocus = (fieldName) => {
@@ -364,37 +411,28 @@ function App() {
 
     if (isSelect) {
       return (
-        <div className="relative">
-          <select
-            ref={isActive ? activeFieldRef : null}
-            name={field}
-            value={patientData[field]}
-            onChange={updateField}
-            onFocus={() => handleFieldFocus(field)}
-            required
-            className={fieldClass}
-          >
-            <option value="" className="bg-gray-800">Select {fieldInfo[field].title}</option>
-            {fieldOptions[field].map(option => (
-              <option key={option.value} value={option.value} className="bg-gray-800">
-                {option.label}
-              </option>
-            ))}
-          </select>
-
-          <div className="flex flex-wrap gap-2 mt-4">
+        <div className="space-y-4">
+          <div className="flex items-baseline justify-between">
+            <label className="text-sm font-medium text-gray-700">{fieldLabels[field] || fieldInfo[field]?.title}</label>
+            <span className="text-xs text-gray-500">Select one</span>
+          </div>
+          {/* Segmented buttons for categorical fields */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {fieldOptions[field].map(option => {
               const isChosen = patientData[field] === option.value;
               return (
                 <button
-                  key={`chip-${option.value}`}
+                  key={`option-${option.value}`}
                   type="button"
                   onClick={(e) => {
+                    e.preventDefault();
                     e.stopPropagation();
                     setFieldValue(field, option.value);
                   }}
-                  className={`px-3 py-1 rounded-full text-xs font-semibold border transition-all duration-200 ${
-                    isChosen ? 'bg-cyan-500 text-black border-transparent' : 'bg-gray-900/60 text-gray-300 border-gray-600 hover:border-cyan-400'
+                  className={`px-8 py-6 rounded-2xl text-xl font-medium text-left border-2 min-h-[84px] ${
+                    isChosen 
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
+                      : 'bg-white text-gray-900 border-gray-300 hover:border-gray-400'
                   }`}
                 >
                   {option.label}
@@ -405,42 +443,42 @@ function App() {
           
           {/* Mobile/Responsive Info Panel */}
           {isActive && showMobileInfo && (
-            <div className="lg:hidden absolute left-0 top-full mt-2 w-full max-w-md z-50 bg-gradient-to-br from-gray-900/95 to-black/95 backdrop-blur-xl rounded-2xl border border-cyan-500/30 p-6 shadow-2xl shadow-cyan-500/20 animate-slideIn">
+            <div className="lg:hidden absolute left-0 top-full mt-2 w-full max-w-md z-50 bg-white rounded-2xl border border-gray-200 p-6 shadow-lg">
               <button 
                 onClick={() => setShowMobileInfo(false)}
-                className="absolute top-2 right-2 text-gray-400 hover:text-white"
+                className="absolute top-2 right-2 text-gray-500 hover:text-gray-700"
               >
                 ✕
               </button>
               
               <div className={`text-center mb-4 bg-gradient-to-r ${fieldInfo[field].color} p-1 rounded-xl`}>
-                <div className="bg-gray-900 rounded-lg p-4">
+                <div className="bg-white rounded-lg p-4">
                   <div className="text-4xl mb-2">{fieldInfo[field].icon}</div>
-                  <h3 className="text-xl font-bold text-white mb-1">{fieldInfo[field].title}</h3>
-                  <p className="text-gray-300 text-sm">{fieldInfo[field].description}</p>
+                  <h3 className="text-xl font-bold text-gray-900 mb-1">{fieldInfo[field].title}</h3>
+                  <p className="text-gray-700 text-sm">{fieldInfo[field].description}</p>
                 </div>
               </div>
 
               <div className="space-y-3">
-                <div className="bg-gradient-to-r from-green-500/20 to-green-600/20 p-3 rounded-lg border border-green-500/30">
-                  <h4 className="font-semibold text-green-400 mb-1 flex items-center text-sm">
+                <div className="bg-gradient-to-r from-green-50 to-green-100 p-3 rounded-lg border border-green-300">
+                  <h4 className="font-semibold text-green-700 mb-1 flex items-center text-sm">
                     <span className="mr-1">✅</span> Normal Range
                   </h4>
-                  <p className="text-green-300 text-xs">{fieldInfo[field].normal}</p>
+                  <p className="text-green-800 text-xs">{fieldInfo[field].normal}</p>
                 </div>
 
-                <div className="bg-gradient-to-r from-amber-500/20 to-amber-600/20 p-3 rounded-lg border border-amber-500/30">
-                  <h4 className="font-semibold text-amber-400 mb-1 flex items-center text-sm">
+                <div className="bg-gradient-to-r from-amber-50 to-amber-100 p-3 rounded-lg border border-amber-300">
+                  <h4 className="font-semibold text-amber-700 mb-1 flex items-center text-sm">
                     <span className="mr-1">⚠️</span> Risk Factors
                   </h4>
-                  <p className="text-amber-300 text-xs">{fieldInfo[field].risk}</p>
+                  <p className="text-amber-800 text-xs">{fieldInfo[field].risk}</p>
                 </div>
 
-                <div className="bg-gradient-to-r from-blue-500/20 to-blue-600/20 p-3 rounded-lg border border-blue-500/30">
-                  <h4 className="font-semibold text-blue-400 mb-1 flex items-center text-sm">
+                <div className="bg-gradient-to-r from-blue-50 to-blue-100 p-3 rounded-lg border border-blue-300">
+                  <h4 className="font-semibold text-blue-700 mb-1 flex items-center text-sm">
                     <span className="mr-1">🔬</span> Clinical Details
                   </h4>
-                  <p className="text-blue-300 text-xs">{fieldInfo[field].detail}</p>
+                  <p className="text-blue-800 text-xs">{fieldInfo[field].detail}</p>
                 </div>
               </div>
             </div>
@@ -450,180 +488,106 @@ function App() {
     }
 
     return (
-      <div className="relative">
-        <input
-          ref={isActive ? activeFieldRef : null}
-          type="number"
-          name={field}
-          value={patientData[field]}
-          onChange={updateField}
-          onFocus={() => handleFieldFocus(field)}
-          required
-          {...constraints}
-          className={fieldClass}
-          placeholder={`Enter ${fieldInfo[field].title.toLowerCase()}`}
-        />
+      <div className="space-y-4">
+        <div className="flex items-baseline justify-between">
+          <label className="text-sm font-medium text-gray-700">{fieldLabels[field] || fieldInfo[field]?.title}</label>
+          {constraints?.min !== undefined && constraints?.max !== undefined && (
+            <span className="text-xs text-gray-500">Expected: {constraints.min}–{constraints.max}</span>
+          )}
+        </div>
+        {/* Large input card */}
+        <div 
+          onClick={() => activeFieldRef.current?.focus()}
+          className="cursor-pointer"
+        >
+          <input
+            ref={isActive ? activeFieldRef : null}
+            type="number"
+            name={field}
+            value={patientData[field]}
+            onChange={updateField}
+            onFocus={() => handleFieldFocus(field)}
+            required
+            {...constraints}
+            className={fieldClass}
+            placeholder=""
+          />
+        </div>
 
+        {/* Smart Assist Row - Compact Pills */}
         {constraints && (
-          <div className="flex flex-wrap gap-2 mt-4 text-xs font-semibold text-gray-200">
+          <div className="flex items-center justify-center gap-2 text-sm">
             {constraints.min !== undefined && (
               <button
                 type="button"
                 onClick={(e) => {
+                  e.preventDefault();
                   e.stopPropagation();
                   setFieldValue(field, String(constraints.min));
                 }}
-                className="px-3 py-1 rounded-full bg-white/10 border border-white/20 hover:bg-white/20 transition"
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium"
               >
-                Min {constraints.min}
+                Min
               </button>
             )}
             {midpoint && (
               <button
                 type="button"
                 onClick={(e) => {
+                  e.preventDefault();
                   e.stopPropagation();
                   setFieldValue(field, midpoint);
                 }}
-                className="px-3 py-1 rounded-full bg-white/10 border border-white/20 hover:bg-white/20 transition"
+                className="px-4 py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg font-medium"
               >
-                Median {midpoint}
+                Typical
               </button>
             )}
             {constraints.max !== undefined && (
               <button
                 type="button"
                 onClick={(e) => {
+                  e.preventDefault();
                   e.stopPropagation();
                   setFieldValue(field, String(constraints.max));
                 }}
-                className="px-3 py-1 rounded-full bg-white/10 border border-white/20 hover:bg-white/20 transition"
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium"
               >
-                Max {constraints.max}
+                Max
               </button>
             )}
+            <span className="text-gray-300 mx-1">|</span>
             <button
               type="button"
               onClick={(e) => {
+                e.preventDefault();
                 e.stopPropagation();
                 adjustFieldValue(field, -numericStep);
               }}
-              className="px-3 py-1 rounded-full bg-gradient-to-r from-red-500/30 to-red-600/30 border border-red-400/40 hover:from-red-500/50 hover:to-red-600/50"
+              className="w-10 h-10 rounded-lg text-gray-700 hover:bg-gray-100 flex items-center justify-center font-medium text-lg"
             >
-              -{numericStep}
+              −
             </button>
             <button
               type="button"
               onClick={(e) => {
+                e.preventDefault();
                 e.stopPropagation();
                 adjustFieldValue(field, numericStep);
               }}
-              className="px-3 py-1 rounded-full bg-gradient-to-r from-green-500/30 to-green-600/30 border border-green-400/40 hover:from-green-500/50 hover:to-green-600/50"
+              className="w-10 h-10 rounded-lg text-gray-700 hover:bg-gray-100 flex items-center justify-center font-medium text-lg"
             >
-              +{numericStep}
+              +
             </button>
-          </div>
-        )}
-        
-        {/* Mobile/Responsive Info Panel */}
-        {isActive && showMobileInfo && (
-          <div className="lg:hidden absolute left-0 top-full mt-2 w-full max-w-md z-50 bg-gradient-to-br from-gray-900/95 to-black/95 backdrop-blur-xl rounded-2xl border border-cyan-500/30 p-6 shadow-2xl shadow-cyan-500/20 animate-slideIn">
-            <button 
-              onClick={() => setShowMobileInfo(false)}
-              className="absolute top-2 right-2 text-gray-400 hover:text-white"
-            >
-              ✕
-            </button>
-            
-            <div className={`text-center mb-4 bg-gradient-to-r ${fieldInfo[field].color} p-1 rounded-xl`}>
-              <div className="bg-gray-900 rounded-lg p-4">
-                <div className="text-4xl mb-2">{fieldInfo[field].icon}</div>
-                <h3 className="text-xl font-bold text-white mb-1">{fieldInfo[field].title}</h3>
-                <p className="text-gray-300 text-sm">{fieldInfo[field].description}</p>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <div className="bg-gradient-to-r from-green-500/20 to-green-600/20 p-3 rounded-lg border border-green-500/30">
-                <h4 className="font-semibold text-green-400 mb-1 flex items-center text-sm">
-                  <span className="mr-1">✅</span> Normal Range
-                </h4>
-                <p className="text-green-300 text-xs">{fieldInfo[field].normal}</p>
-              </div>
-
-              <div className="bg-gradient-to-r from-amber-500/20 to-amber-600/20 p-3 rounded-lg border border-amber-500/30">
-                <h4 className="font-semibold text-amber-400 mb-1 flex items-center text-sm">
-                  <span className="mr-1">⚠️</span> Risk Factors
-                </h4>
-                <p className="text-amber-300 text-xs">{fieldInfo[field].risk}</p>
-              </div>
-
-              <div className="bg-gradient-to-r from-blue-500/20 to-blue-600/20 p-3 rounded-lg border border-blue-500/30">
-                <h4 className="font-semibold text-blue-400 mb-1 flex items-center text-sm">
-                  <span className="mr-1">🔬</span> Clinical Details
-                </h4>
-                <p className="text-blue-300 text-xs">{fieldInfo[field].detail}</p>
-              </div>
-            </div>
           </div>
         )}
       </div>
     );
   };
 
-  const quickStats = [
-    {
-      title: "Fields Completed",
-      value: `${completedFields.size}/${totalFields}`,
-      sub: completionPercentage === 0 ? "Awaiting input" : `${Math.round(completionPercentage)}% ready`,
-      accent: "from-cyan-500/30 to-blue-500/30",
-    },
-    {
-      title: "AI Model Accuracy",
-      value: "85.4%",
-      sub: "Trained on Cleveland dataset",
-      accent: "from-purple-500/30 to-pink-500/30",
-    },
-    {
-      title: "Review Reminder",
-      value: "30 days",
-      sub: "Recommended follow-up window",
-      accent: "from-amber-500/30 to-orange-500/30",
-    },
-    {
-      title: "Data Security",
-      value: "AES-256",
-      sub: "In-transit encryption",
-      accent: "from-emerald-500/30 to-teal-500/30",
-    },
-  ];
 
-  const aiInsightStats = [
-    {
-      title: "AI Confidence",
-      value: prediction ? `${formatPercentage(prediction.confidence)}%` : "Pending",
-      sub: prediction ? "Based on provided biomarkers" : "Fill inputs to unlock",
-      badge: "🔐",
-    },
-    {
-      title: "Risk Signal",
-      value: prediction ? prediction.risk_level : "Unknown",
-      sub: prediction ? "Personalized severity grade" : "Awaiting analysis",
-      badge: "📡",
-    },
-    {
-      title: "Recommendation",
-      value: prediction?.recommendation ? `${prediction.recommendation.split('.')[0]}.` : "Guidance appears here",
-      sub: "AI-generated advisory",
-      badge: "🩺",
-    },
-  ];
 
-  const accentOrbs = [
-    { className: "glow-orb top-12 -right-10 w-80 h-80 bg-cyan-500/20" },
-    { className: "glow-orb -top-24 left-10 w-64 h-64 bg-purple-500/20" },
-    { className: "glow-orb bottom-10 right-20 w-56 h-56 bg-pink-500/10" },
-  ];
+
 
   const currentFieldData = getCurrentField();
   const currentField = currentFieldData.field;
@@ -631,488 +595,487 @@ function App() {
   const currentFieldInfo = fieldInfo[currentField] || fieldInfo[fieldOrder[0]];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-purple-900 relative overflow-hidden">
-      {/* Gaming-style background effects */}
-      <div className="fixed inset-0 bg-gradient-to-br from-blue-900/20 via-gray-900 to-black"></div>
+    <div className="min-h-screen flex flex-col app-shell">
+      {showLanding && (
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 z-[100] flex items-center justify-center px-6 bg-white">
+              <div className="text-center">
+                <button
+                  type="button"
+                  onClick={goToHeart}
+                  className="text-5xl leading-none"
+                  aria-label="Open 3D heart"
+                  title="Open 3D heart"
+                >
+                  ❤️
+                </button>
+                <div className="mt-4 text-gray-700 font-medium">Loading…</div>
+              </div>
+            </div>
+          }
+        >
+          <LandingExperience
+            onComplete={() => {
+              setShowLanding(false);
+              // Ensure the existing flow starts exactly as it does today.
+              setPrediction(null);
+              setError(null);
+              setActiveField('age');
+              setCurrentStep(0);
+            }}
+          />
+        </Suspense>
+      )}
 
-      {accentOrbs.map((orb, index) => (
-        <div key={`orb-${index}`} className={`${orb.className} blur-3xl opacity-70`} aria-hidden="true"></div>
-      ))}
-      
-      {/* Animated particles */}
-      <Particles />
-      
-      {/* Animated grid overlay */}
-      <div className="fixed inset-0 opacity-10">
-        <div className="w-full h-full" style={{
-          backgroundImage: `linear-gradient(rgba(0,255,255,0.1) 1px, transparent 1px),
-                           linear-gradient(90deg, rgba(0,255,255,0.1) 1px, transparent 1px)`,
-          backgroundSize: '50px 50px'
-        }}></div>
-      </div>
-
-      <div className="relative z-10 min-h-screen p-4">
-        {/* Back button - top left */}
-        {prediction && (
-          <button
-            onClick={resetForm}
-            className="fixed top-6 left-6 z-50 flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-cyan-500/20 to-blue-500/20 hover:from-cyan-500/40 hover:to-blue-500/40 border border-cyan-500/50 rounded-xl text-white transition-all duration-300 backdrop-blur-sm shadow-lg hover:shadow-cyan-500/50 hover:scale-105"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-            </svg>
-            <span className="font-semibold">Back</span>
-          </button>
-        )}
-
-        {/* Gaming-style header */}
-        <div className="text-center mb-10 pt-8">
-          <button
-            onClick={resetForm}
-            className="inline-flex items-center justify-center w-24 h-24 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full mb-6 shadow-2xl shadow-cyan-500/50 animate-pulse hover:scale-110 transition-transform duration-300 cursor-pointer"
-          >
-            <span className="text-4xl">❤️</span>
-          </button>
-          <h1 className="text-6xl font-bold bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400 bg-clip-text text-transparent mb-4">
-            CARDIAC RISK ANALYZER
-          </h1>
-          <p className="text-xl text-gray-300 mb-4">Advanced AI-Powered Heart Disease Prediction System</p>
-          <p className="text-sm uppercase tracking-[0.4em] text-cyan-200/70 mb-6">XGBoost Engine • Real-time Biomarker Scoring • Secure Insights</p>
-
-          <div className="flex flex-col sm:flex-row justify-center gap-4 mb-6">
+      {/* Top Sticky Header */}
+      <header className="fixed top-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-b border-gray-200 z-50">
+          <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={goToHeart}
+                className="text-3xl leading-none hover:text-blue-600 transition-colors"
+                aria-label="Open 3D heart"
+                title="Open 3D heart"
+              >
+                ❤️
+              </button>
+              <button
+                type="button"
+                onClick={resetForm}
+                className="text-gray-900 font-medium text-base hover:text-blue-600 transition-colors"
+              >
+                Cardiac Risk Analyzer
+              </button>
+            </div>
+            
+            <div className="absolute left-1/2 -translate-x-1/2 text-center">
+              <div className="text-sm font-semibold text-gray-700">
+                {prediction
+                  ? "Results"
+                  : `Step ${Math.min(currentStep + 1, fieldOrder.length)} of ${fieldOrder.length} • ${Math.round(completionPercentage)}%`}
+              </div>
+              {!prediction && (
+                <div className="text-xs text-gray-500 mt-0.5">{progressHint}</div>
+              )}
+            </div>
+            
             <button
-              onClick={handleScrollToForm}
-              className="px-8 py-4 bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-500 rounded-2xl text-white font-semibold shadow-2xl shadow-cyan-500/40 hover:translate-y-[-2px] transition-all duration-300"
-            >
-              Start / Continue Input
-            </button>
-            <button
+              type="button"
               onClick={resetForm}
-              className="px-8 py-4 bg-white/10 border border-white/20 rounded-2xl text-white font-semibold backdrop-blur hover:bg-white/20 transition-all duration-300"
+              className="px-4 py-2 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-50 text-base font-medium transition-colors"
             >
-              Reset Dashboard
+              Reset
             </button>
           </div>
           
-          {/* Gaming-style progress bar */}
-          <div className="max-w-md mx-auto mb-6">
-            <div className="flex justify-between text-sm text-gray-400 mb-2">
-              <span>Progress</span>
-              <span>{Math.round(completionPercentage)}%</span>
-            </div>
-            <div className="h-3 bg-gray-800 rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full transition-all duration-500 ease-out relative"
-                style={{ width: `${completionPercentage}%` }}
-              >
-                <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
-              </div>
-            </div>
+          {/* Smooth progress bar */}
+          <div className="absolute bottom-0 left-0 right-0 h-2 bg-gray-100">
+            <div 
+              className="h-full bg-gradient-to-r from-blue-600 to-blue-700"
+              style={{ width: `${completionPercentage}%` }}
+            ></div>
           </div>
-
-          {/* Clickable step chips */}
-          <div className="max-w-5xl mx-auto mb-10">
-            <div className="flex gap-3 overflow-x-auto py-3 px-3 bg-white/5 border border-white/10 rounded-3xl backdrop-blur scrollhide">
-              {fieldOrder.map((field, index) => {
-                const isActive = field === activeField;
-                const isDone = completedFields.has(field);
-                return (
-                  <button
-                    key={field}
-                    onClick={() => navigateToStep(index)}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-2xl text-sm font-semibold transition-all duration-300 border ${
-                      isActive
-                        ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-black border-transparent shadow-lg shadow-cyan-500/40'
-                        : 'bg-gray-900/60 text-gray-300 border-white/10 hover:text-white hover:border-cyan-400/40'
-                    } ${isDone && !isActive ? 'opacity-80' : ''}`}
-                    title={`Jump to ${fieldInfo[field].title}`}
-                  >
-                    <span className="text-lg">{fieldInfo[field].icon}</span>
-                    <span>{index + 1}</span>
-                    {isDone && <span className="text-xs">✅</span>}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        <div className="max-w-6xl mx-auto mb-12">
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
-            {quickStats.map((stat, index) => (
-              <div
-                key={stat.title}
-                className={`neon-card bg-white/5 border border-white/10 rounded-3xl p-5 relative overflow-hidden backdrop-blur ${index % 2 === 0 ? 'animate-floatSlow' : 'animate-floatSlow-delayed'}`}
-              >
-                <div className={`absolute inset-0 bg-gradient-to-br ${stat.accent} opacity-20`}></div>
-                <div className="relative">
-                  <p className="text-sm uppercase tracking-widest text-gray-300/80 mb-2">{stat.title}</p>
-                  <p className="text-3xl font-bold text-white mb-1">{stat.value}</p>
-                  <p className="text-cyan-100 text-sm">{stat.sub}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+      </header>
 
         {/* Main content area */}
-        <div className="max-w-7xl mx-auto">
-          {/* Prediction Results - Gaming Style */}
-          {prediction && (
-            <div className="mb-8 p-8 bg-gradient-to-r from-gray-900/90 to-black/90 backdrop-blur-xl rounded-3xl border border-cyan-500/30 shadow-2xl shadow-cyan-500/20 animate-slideIn">
-              <div className="text-center">
-                <h2 className="text-4xl font-bold text-white mb-6 flex items-center justify-center">
-                  <button
-                    onClick={resetForm}
-                    className="text-5xl mr-4 hover:scale-125 transition-transform duration-300 cursor-pointer"
-                    title="Back to Home"
-                  >
-                    🔬
-                  </button>
-                  ANALYSIS COMPLETE
-                </h2>
-                
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                  <div className="bg-gradient-to-br from-red-500/20 to-red-600/20 p-6 rounded-2xl border border-red-500/30 backdrop-blur-sm transform hover:scale-105 transition-all duration-300">
-                    <div className="text-5xl font-bold text-red-400 mb-2">{parseFloat(prediction.risk_probability).toFixed(2)}%</div>
-                    <div className="text-red-300">Risk Probability</div>
-                  </div>
-                  
-                  <div className={`p-6 rounded-2xl border backdrop-blur-sm transform hover:scale-105 transition-all duration-300 ${
-                    prediction.risk_level === 'Low Risk' ? 'bg-gradient-to-br from-green-500/20 to-green-600/20 border-green-500/30' :
-                    prediction.risk_level === 'Moderate Risk' ? 'bg-gradient-to-br from-yellow-500/20 to-yellow-600/20 border-yellow-500/30' :
-                    'bg-gradient-to-br from-red-500/20 to-red-600/20 border-red-500/30'
-                  }`}>
-                    <div className={`text-2xl font-semibold mb-2 ${
-                      prediction.risk_level === 'Low Risk' ? 'text-green-400' :
-                      prediction.risk_level === 'Moderate Risk' ? 'text-yellow-400' : 'text-red-400'
-                    }`}>
-                      {prediction.risk_level}
+        <main className={`${!prediction ? "pt-24 pb-32" : "py-12"} px-6 flex-1`}>
+          <div className="max-w-7xl mx-auto">
+            <div className="lg:grid lg:grid-cols-[280px_minmax(0,720px)_280px] lg:gap-10">
+              {/* LEFT PANEL — Emotional Hook */}
+              <aside className="hidden lg:block">
+                <div className="sticky top-28 space-y-4">
+                  <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+                    <button
+                      type="button"
+                      onClick={goToHeart}
+                      className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-blue-50 border border-blue-100 text-blue-700 text-xl hover:bg-blue-100"
+                      aria-label="Open 3D heart"
+                      title="Open 3D heart"
+                    >
+                      💗
+                    </button>
+                    <h3 className="mt-4 text-2xl font-semibold text-gray-900 leading-tight tracking-tight">
+                      Your Heart.
+                      <br />
+                      Your Numbers.
+                    </h3>
+                    <p className="mt-3 text-sm text-gray-600 leading-relaxed">
+                      Understand your cardiac risk before symptoms appear.
+                    </p>
+                    <div className="mt-5 rounded-xl border border-gray-200 bg-gray-50 p-4">
+                      <div className="text-xs font-semibold text-gray-900">Why this matters</div>
+                      <ul className="mt-3 space-y-2 text-sm text-gray-600">
+                        <li className="flex gap-2"><span className="text-gray-400">•</span><span>Age is the strongest predictor of cardiac risk</span></li>
+                        <li className="flex gap-2"><span className="text-gray-400">•</span><span>Used by ML models worldwide</span></li>
+                        <li className="flex gap-2"><span className="text-gray-400">•</span><span>Helps personalize risk estimation</span></li>
+                      </ul>
                     </div>
-                    <div className="text-gray-300">Risk Level</div>
                   </div>
-                  
-                  <div className="bg-gradient-to-br from-blue-500/20 to-blue-600/20 p-6 rounded-2xl border border-blue-500/30 backdrop-blur-sm transform hover:scale-105 transition-all duration-300">
-                    <div className="text-2xl font-semibold text-blue-400 mb-2">{formatPercentage(prediction.confidence)}%</div>
-                    <div className="text-blue-300">Confidence</div>
-                  </div>
+                </div>
+              </aside>
+
+              {/* Center Column (Input Focus Area) */}
+              <div className="min-w-0">
+                <div className="max-w-[720px] mx-auto">
+            {/* Prediction Results - Guided, Reassuring, Premium */}
+            {prediction && (
+              <div className="mb-8 p-8 md:p-12 bg-white rounded-3xl border border-gray-300 shadow-md relative overflow-hidden">
+                <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600"></div>
+                {/* Header with Checkmark */}
+                <div className="text-center mb-12">
+                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-blue-100 text-blue-600 text-3xl mb-5">✓</div>
+                  <h2 className="text-4xl font-semibold text-gray-900 mb-3 tracking-tight">Analysis Complete</h2>
+                  <p className="text-gray-600 text-lg">Your cardiac risk assessment has been processed</p>
                 </div>
                 
-                <div className="bg-gradient-to-br from-gray-800/50 to-gray-900/50 p-6 rounded-2xl border border-gray-600/30 backdrop-blur-sm mb-6">
-                  <h3 className="font-semibold text-cyan-400 mb-3 text-xl">📋 Medical Recommendation:</h3>
-                  <p className="text-gray-300 text-lg">{prediction.recommendation}</p>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-                  {aiInsightStats.map((insight) => (
-                    <div key={insight.title} className="bg-white/5 border border-white/10 rounded-2xl p-5 backdrop-blur relative overflow-hidden">
-                      <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent"></div>
-                      <div className="relative">
-                        <p className="text-sm text-gray-300 mb-2 flex items-center gap-2">
-                          <span>{insight.badge}</span>
-                          {insight.title}
-                        </p>
-                        <p className="text-2xl font-semibold text-white mb-1">{insight.value}</p>
-                        <p className="text-xs uppercase tracking-[0.3em] text-cyan-200/70">{insight.sub}</p>
+                {/* Risk Visualization - Primary Focus */}
+                <div className="flex flex-col items-center mb-16">
+                  <div className="relative mb-6">
+                    {/* Circular Progress Ring */}
+                    <svg className="w-48 h-48 transform -rotate-90" viewBox="0 0 200 200">
+                      {/* Background circle */}
+                      <circle
+                        cx="100"
+                        cy="100"
+                        r="85"
+                        fill="none"
+                        stroke="#f3f4f6"
+                        strokeWidth="12"
+                      />
+                      {/* Progress circle */}
+                      <circle
+                        cx="100"
+                        cy="100"
+                        r="85"
+                        fill="none"
+                        stroke={
+                          prediction.risk_level === 'Low Risk' ? '#10b981' :
+                          prediction.risk_level === 'Moderate Risk' ? '#f59e0b' : '#ef4444'
+                        }
+                        strokeWidth="12"
+                        strokeDasharray={`${(parseFloat(prediction.risk_probability) / 100) * 534} 534`}
+                        strokeLinecap="round"
+                        className="transition-all duration-1000"
+                      />
+                    </svg>
+                    {/* Center text */}
+                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                      <div className={`text-5xl font-semibold mb-1 ${
+                        prediction.risk_level === 'Low Risk' ? 'text-green-600' :
+                        prediction.risk_level === 'Moderate Risk' ? 'text-amber-600' : 'text-red-600'
+                      }`}>
+                        {parseFloat(prediction.risk_probability).toFixed(0)}%
                       </div>
+                      <div className="text-sm text-gray-500">Risk Score</div>
                     </div>
-                  ))}
+                  </div>
+                  <h3 className="text-xl font-medium text-gray-900 mb-2">Overall Heart Disease Risk</h3>
+                  <p className={`text-base font-medium ${
+                    prediction.risk_level === 'Low Risk' ? 'text-green-600' :
+                    prediction.risk_level === 'Moderate Risk' ? 'text-amber-600' : 'text-red-600'
+                  }`}>
+                    {prediction.risk_level}
+                  </p>
                 </div>
 
-                <div className="flex flex-col sm:flex-row gap-4 justify-center mb-4">
+                {/* Key Metrics */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-12">
+                  <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100">
+                    <div className="text-sm font-medium text-gray-500 mb-2">Risk Probability</div>
+                    <div className="text-3xl font-semibold text-gray-900">{parseFloat(prediction.risk_probability).toFixed(1)}%</div>
+                  </div>
+                  
+                  <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100">
+                    <div className="text-sm font-medium text-gray-500 mb-2">Risk Classification</div>
+                    <div className={`text-2xl font-semibold ${
+                      prediction.risk_level === 'Low Risk' ? 'text-green-600' :
+                      prediction.risk_level === 'Moderate Risk' ? 'text-amber-600' : 'text-red-600'
+                    }`}>
+                      {prediction.risk_level.replace(' Risk', '')}
+                    </div>
+                  </div>
+                  
+                  <div className="p-6 bg-gray-50 rounded-2xl border border-gray-100">
+                    <div className="text-sm font-medium text-gray-500 mb-2">Model Confidence</div>
+                    <div className="text-3xl font-semibold text-gray-900">{formatPercentage(prediction.confidence)}%</div>
+                  </div>
+                </div>
+
+                {/* Contributing Factors - Expandable */}
+                <details className="mb-8 group">
+                  <summary className="cursor-pointer p-5 bg-gray-50 rounded-2xl border border-gray-100 hover:bg-gray-100 transition-colors">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-base font-medium text-gray-900">What influenced this score?</h3>
+                        <p className="text-sm text-gray-500 mt-1">View key contributing factors</p>
+                      </div>
+                      <svg className="w-5 h-5 text-gray-400 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </summary>
+                  <div className="mt-4 p-6 bg-white border border-gray-100 rounded-2xl">
+                    <p className="text-sm text-gray-600 mb-4">Analysis based on these biomarkers:</p>
+                    <ul className="space-y-3">
+                      <li className="flex items-start">
+                        <span className="w-2 h-2 bg-gray-400 rounded-full mt-2 mr-3 flex-shrink-0"></span>
+                        <div>
+                          <span className="font-medium text-gray-900">Age & Gender</span>
+                          <span className="text-gray-600"> - Demographic risk factors</span>
+                        </div>
+                      </li>
+                      <li className="flex items-start">
+                        <span className="w-2 h-2 bg-gray-400 rounded-full mt-2 mr-3 flex-shrink-0"></span>
+                        <div>
+                          <span className="font-medium text-gray-900">Blood Pressure</span>
+                          <span className="text-gray-600"> - Resting systolic measurement</span>
+                        </div>
+                      </li>
+                      <li className="flex items-start">
+                        <span className="w-2 h-2 bg-gray-400 rounded-full mt-2 mr-3 flex-shrink-0"></span>
+                        <div>
+                          <span className="font-medium text-gray-900">Cholesterol Levels</span>
+                          <span className="text-gray-600"> - Serum cholesterol concentration</span>
+                        </div>
+                      </li>
+                      <li className="flex items-start">
+                        <span className="w-2 h-2 bg-gray-400 rounded-full mt-2 mr-3 flex-shrink-0"></span>
+                        <div>
+                          <span className="font-medium text-gray-900">Chest Pain Pattern</span>
+                          <span className="text-gray-600"> - Type and characteristics</span>
+                        </div>
+                      </li>
+                      <li className="flex items-start">
+                        <span className="w-2 h-2 bg-gray-400 rounded-full mt-2 mr-3 flex-shrink-0"></span>
+                        <div>
+                          <span className="font-medium text-gray-900">Exercise & ECG Results</span>
+                          <span className="text-gray-600"> - Cardiac stress indicators</span>
+                        </div>
+                      </li>
+                    </ul>
+                  </div>
+                </details>
+
+                {/* Medical Recommendation - Calm and Clear */}
+                <div className="p-7 bg-blue-50 rounded-2xl border-2 border-blue-100 mb-8">
+                  <div className="flex items-start gap-4">
+                    <svg className="w-6 h-6 text-blue-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <div>
+                      <h3 className="text-base font-semibold text-blue-900 mb-3">Important Medical Guidance</h3>
+                      <p className="text-base text-blue-800 leading-relaxed mb-3">{prediction.recommendation}</p>
+                      <p className="text-sm text-blue-700 leading-relaxed">
+                        This analysis is for educational purposes only and does not constitute medical advice, diagnosis, or treatment. 
+                        Always consult with qualified healthcare professionals for proper medical evaluation and personalized care.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Two CTAs - Clear Hierarchy */}
+                <div className="flex flex-col sm:flex-row gap-4 justify-center items-stretch mb-6">
                   <button
                     onClick={resetForm}
-                    className="flex-1 px-6 py-4 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-2xl font-semibold shadow-lg hover:shadow-pink-500/40 transition-all duration-300"
+                    className="flex-1 px-10 py-5 bg-white border-2 border-gray-300 text-gray-900 rounded-xl font-semibold hover:bg-gray-50 hover:border-gray-400 transition-all text-lg"
                   >
-                    🔄 Run New Analysis
-                  </button>
-                  <button
-                    onClick={handleScrollToForm}
-                    className="flex-1 px-6 py-4 bg-gradient-to-r from-cyan-500 to-blue-500 text-white rounded-2xl font-semibold shadow-lg hover:shadow-cyan-500/40 transition-all duration-300"
-                  >
-                    ✏️ Adjust Inputs
+                    Run New Analysis
                   </button>
                   <button
                     type="button"
-                    className="flex-1 px-6 py-4 bg-white/10 border border-white/20 text-white rounded-2xl font-semibold backdrop-blur hover:bg-white/20 transition-all duration-300"
+                    className="flex-1 px-10 py-5 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20 hover:shadow-xl hover:shadow-blue-600/30 text-lg"
                     onClick={() => window.open('https://www.heart.org/en/healthy-living', '_blank')}
                   >
-                    📘 Heart Health Guide
+                    View Heart Health Guide
                   </button>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Error Display - Gaming Style */}
-          {error && (
-            <div className="mb-6 p-6 bg-gradient-to-r from-red-900/50 to-red-800/50 backdrop-blur-xl rounded-2xl border border-red-500/50 animate-shake">
-              <p className="text-red-300 flex items-center">
-                <span className="text-2xl mr-3">⚠️</span>
-                {error}
-              </p>
-            </div>
-          )}
-
-          {/* Two-column layout - Gaming Enhanced */}
-          {!prediction && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              {/* Left Panel - Information Display (Hidden on mobile, shows as popup instead) */}
-              <div className="hidden lg:block bg-gradient-to-br from-gray-900/80 to-black/80 backdrop-blur-xl rounded-3xl border border-cyan-500/30 p-8 shadow-2xl shadow-cyan-500/10 sticky top-4 h-fit">
-                <div className={`text-center mb-6 bg-gradient-to-r ${currentFieldInfo.color} p-1 rounded-2xl`}>
-                  <div className="bg-gray-900 rounded-xl p-6">
-                    <div className="text-6xl mb-4 animate-bounce">{currentFieldInfo.icon}</div>
-                    <h2 className="text-3xl font-bold text-white mb-2">{currentFieldInfo.title}</h2>
-                    <p className="text-gray-300 text-lg">{currentFieldInfo.description}</p>
-                  </div>
-                </div>
-
-                <div className="space-y-6">
-                  <div className="bg-gradient-to-r from-green-500/20 to-green-600/20 p-4 rounded-xl border border-green-500/30">
-                    <h3 className="font-semibold text-green-400 mb-2 flex items-center">
-                      <span className="mr-2">✅</span> Normal Range
-                    </h3>
-                    <p className="text-green-300">{currentFieldInfo.normal}</p>
-                  </div>
-
-                  <div className="bg-gradient-to-r from-amber-500/20 to-amber-600/20 p-4 rounded-xl border border-amber-500/30">
-                    <h3 className="font-semibold text-amber-400 mb-2 flex items-center">
-                      <span className="mr-2">⚠️</span> Risk Factors
-                    </h3>
-                    <p className="text-amber-300">{currentFieldInfo.risk}</p>
-                  </div>
-
-                  <div className="bg-gradient-to-r from-blue-500/20 to-blue-600/20 p-4 rounded-xl border border-blue-500/30">
-                    <h3 className="font-semibold text-blue-400 mb-2 flex items-center">
-                      <span className="mr-2">🔬</span> Clinical Details
-                    </h3>
-                    <p className="text-blue-300">{currentFieldInfo.detail}</p>
-                  </div>
-                </div>
+            {/* Error Display - Minimal Style */}
+            {error && (
+              <div className="mb-8 p-4 bg-red-50 rounded-xl border border-red-200">
+                <p className="text-red-800 text-sm">{error}</p>
               </div>
+            )}
 
-              {/* Right Panel - Form */}
-              <div ref={formRef} className="bg-gradient-to-br from-gray-900/80 to-black/80 backdrop-blur-xl rounded-3xl border border-purple-500/30 p-8 shadow-2xl shadow-purple-500/10 relative">
-                {/* Mobile Info Toggle Button */}
-                <button
-                  onClick={() => setShowMobileInfo(!showMobileInfo)}
-                  className="lg:hidden absolute top-4 right-4 w-12 h-12 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full flex items-center justify-center text-white shadow-lg hover:shadow-cyan-500/50 transition-all duration-300 z-10"
-                >
-                  ℹ️
-                </button>
-
-                <h2 className="text-3xl font-bold text-white mb-6 text-center flex items-center justify-center">
-                  <span className="mr-3 text-4xl">🎯</span>
-                  Patient Data Input
-                </h2>
-
-                {/* Progress Indicator */}
-                <div className="mb-8 bg-gray-900/50 rounded-xl p-4 border border-gray-600">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-sm font-semibold text-gray-300">
-                      Step {Math.min(currentStep + 1, fieldOrder.length)} of {fieldOrder.length}
-                    </span>
-                    <span className="text-sm font-semibold text-cyan-400">
-                      {Math.round(completionPercentage)}% Complete
-                    </span>
-                  </div>
-                  <div className="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
-                    <div 
-                      className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full transition-all duration-500 relative overflow-hidden"
-                      style={{ width: `${completionPercentage}%` }}
-                    >
-                      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-pulse"></div>
-                    </div>
-                  </div>
-                  <div className="mt-2 text-xs text-gray-400 text-center">
-                    {completionPercentage === 100 ? "🎉 All fields completed! Ready to predict!" : 
-                     currentFieldInfo ? `Current: ${currentFieldInfo.title}` : ""}
-                  </div>
-                </div>
-
-                <form onSubmit={submitPrediction} className="space-y-6" onClick={() => setShowMobileInfo(false)}>
+            {/* Single column form - Guided Flow */}
+            {!prediction && (
+              <div className="max-w-[720px] mx-auto">
+                {/* Premium form with fade-in */}
+                <form ref={formRef} onSubmit={submitPrediction} onKeyDown={handleKeyDown} className="space-y-10">
                   {currentField && (
-                      <div 
-                        key={currentField} 
-                        className="group animate-slideInUp transition-all duration-700 transform cursor-pointer"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          focusActiveField();
-                        }}
-                      >
-                        <label className="flex text-sm font-semibold text-gray-300 mb-3 items-center group-hover:text-cyan-400 transition-colors">
-                          <span className="text-2xl mr-3">{fieldInfo[currentField].icon}</span>
-                          <span className="flex items-center">
-                            <span className="bg-gradient-to-r from-cyan-500 to-blue-500 text-black px-3 py-1 rounded-full text-xs font-bold mr-3 shadow-lg">
-                              {currentFieldIndex + 1} / {fieldOrder.length}
-                            </span>
-                            {fieldInfo[currentField].title}
-                          </span>
-                          <span className="text-red-400 ml-2">*</span>
-                          {completedFields.has(currentField) && (
-                            <span className="ml-auto text-green-400 animate-pulse">✅</span>
-                          )}
-                        </label>
-                        {renderField(currentField)}
-                        
-                        {/* Stylish completion prompt with Next button */}
-                        {!completedFields.has(currentField) && (
-                          <div className="mt-4 flex items-center justify-center">
-                            <div className="bg-gradient-to-r from-cyan-500/20 to-blue-500/20 backdrop-blur-sm rounded-xl p-3 border border-cyan-500/30 flex items-center space-x-3">
-                              <div className="flex space-x-1">
-                                <div className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce"></div>
-                                <div className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
-                                <div className="w-2 h-2 bg-cyan-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
-                              </div>
-                              <span className="text-cyan-300 text-sm font-medium">Please fill this field</span>
-                              <div className="text-cyan-400">✨</div>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Next/Previous buttons when field is completed */}
-                        {completedFields.has(currentField) && (
-                          <div className="mt-6 flex justify-between items-center">
-                            {currentFieldIndex > 0 && (
+                    <div key={currentField} className="space-y-8">
+                      <div className="bg-white border border-gray-300 rounded-3xl p-8 md:p-10 shadow-md relative overflow-hidden">
+                        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600"></div>
+                        {/* Step Title - Strong Hierarchy */}
+                        <div className="text-center space-y-4 mb-10">
+                          <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-blue-100 text-blue-600 text-xl mb-4">
+                            {isHeartSymbol(fieldInfo[currentField].icon) ? (
                               <button
                                 type="button"
-                                onClick={() => navigateToStep(currentFieldIndex - 1)}
-                                className="bg-gradient-to-r from-gray-600 to-gray-700 text-white py-3 px-6 rounded-xl font-semibold hover:from-gray-500 hover:to-gray-600 transition-all duration-300 flex items-center space-x-2 shadow-lg transform hover:scale-105"
+                                onClick={goToHeart}
+                                className="w-full h-full rounded-full"
+                                aria-label="Open 3D heart"
+                                title="Open 3D heart"
                               >
-                                <span>⬅️</span>
-                                <span>Previous</span>
-                              </button>
-                            )}
-
-                            {currentFieldIndex < fieldOrder.length - 1 ? (
-                              <button
-                                type="button"
-                                onClick={() => navigateToStep(currentFieldIndex + 1)}
-                                className="bg-gradient-to-r from-cyan-500 to-blue-500 text-white py-3 px-8 rounded-xl font-bold hover:from-cyan-400 hover:to-blue-400 transition-all duration-300 flex items-center space-x-3 shadow-lg transform hover:scale-105 ml-auto"
-                              >
-                                <span>Next Field</span>
-                                <span>➡️</span>
+                                {fieldInfo[currentField].icon}
                               </button>
                             ) : (
-                              <div className="ml-auto bg-gradient-to-r from-green-500/20 to-green-600/20 backdrop-blur-sm rounded-xl p-3 border border-green-500/30 flex items-center space-x-2">
-                                <span className="text-green-400">🎉</span>
-                                <span className="text-green-300 font-medium">All fields completed!</span>
-                              </div>
+                              fieldInfo[currentField].icon
                             )}
                           </div>
-                        )}
-                      </div>
-                    )}
+                          <h2 className="text-4xl font-semibold text-gray-900 tracking-tight">{fieldInfo[currentField].title}</h2>
+                          <p className="text-gray-600 text-lg max-w-2xl mx-auto leading-relaxed">{fieldInfo[currentField].description}</p>
+                        </div>
 
-                  {/* Progress status indicator */}
-                  {completionPercentage < 100 && (
-                    <div className="pt-4 text-center">
-                      <div className="text-cyan-400 text-sm font-medium bg-cyan-500/10 px-4 py-2 rounded-lg border border-cyan-500/30 inline-block">
-                        <span className="animate-pulse">💡</span> Fill the field and click "Next Field" to continue
+                        {/* Primary Input - Very Important */}
+                        <div className="space-y-5">
+                          {renderField(currentField)}
+
+                          {/* Micro-Feedback (supports 0 / "0") */}
+                          {(() => {
+                            const feedback = getMicroFeedback(currentField);
+                            if (!feedback) return null;
+                            const isWarn = feedback.tone === "warn";
+                            return (
+                              <div className={`flex items-center gap-2 text-sm font-medium ${isWarn ? 'text-amber-700' : 'text-green-700'}`}>
+                                <span>{feedback.label.split(" ")[0]}</span>
+                                <span>{feedback.label.replace(/^\S+\s/, "")}</span>
+                              </div>
+                            );
+                          })()}
+                        </div>
+
+                        {/* Contextual Insight - Collapsible */}
+                        <details className="group mt-8">
+                          <summary className="cursor-pointer p-4 bg-gray-50 hover:bg-gray-100 rounded-xl transition-colors list-none flex items-center justify-between">
+                            <span className="text-sm font-medium text-gray-700">Why we ask this</span>
+                            <svg className="w-5 h-5 text-gray-400 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </summary>
+                          <div className="mt-4 space-y-4 text-sm">
+                            <div className="p-5 bg-green-50/50 rounded-xl border border-green-100">
+                              <p className="font-semibold text-green-900 mb-2 flex items-center gap-2">
+                                <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                                Normal Range
+                              </p>
+                              <p className="text-green-800 leading-relaxed">{currentFieldInfo.normal}</p>
+                            </div>
+                            <div className="p-5 bg-amber-50/50 rounded-xl border border-amber-100">
+                              <p className="font-semibold text-amber-900 mb-2 flex items-center gap-2">
+                                <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
+                                How This Affects Risk
+                              </p>
+                              <p className="text-amber-800 leading-relaxed">{currentFieldInfo.risk}</p>
+                            </div>
+                            <div className="p-5 bg-blue-50/50 rounded-xl border border-blue-100">
+                              <p className="font-semibold text-blue-900 mb-2 flex items-center gap-2">
+                                <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
+                                Clinical Context
+                              </p>
+                              <p className="text-blue-800 leading-relaxed">{currentFieldInfo.detail}</p>
+                            </div>
+                          </div>
+                        </details>
+
+                        {/* Actions (inside card bottom) */}
+                        <div className="mt-10 flex items-center justify-between">
+                          <button
+                            type="button"
+                            onClick={() => navigateToStep(currentFieldIndex - 1)}
+                            disabled={currentFieldIndex === 0}
+                            className="text-sm font-medium text-gray-600 hover:text-gray-900 disabled:opacity-0 disabled:cursor-not-allowed"
+                          >
+                            ← Back
+                          </button>
+
+                          {currentFieldIndex < fieldOrder.length - 1 ? (
+                            <button
+                              type="button"
+                              onClick={() => navigateToStep(currentFieldIndex + 1)}
+                              disabled={!completedFields.has(currentField)}
+                              className="px-8 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
+                            >
+                              Next
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={submitPrediction}
+                              disabled={isSubmitting || completionPercentage < 100}
+                              className="px-8 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 shadow-sm"
+                            >
+                              {isSubmitting ? (
+                                <>
+                                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                  <span>Analyzing...</span>
+                                </>
+                              ) : (
+                                <span>Complete Analysis</span>
+                              )}
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   )}
-
-                  <div className="pt-8">
-                    <button
-                      type="submit"
-                      disabled={isSubmitting || completionPercentage < 100}
-                      className="w-full bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-500 text-white py-4 px-8 rounded-xl font-bold text-xl shadow-2xl hover:shadow-cyan-500/50 transform hover:scale-105 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center space-x-3 relative overflow-hidden group"
-                    >
-                      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent transform -skew-x-12 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
-                      {isSubmitting ? (
-                        <>
-                          <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                          <span className="text-2xl">ANALYZING...</span>
-                        </>
-                      ) : (
-                        <>
-                          <span className="text-3xl">🚀</span>
-                          <span className="text-2xl">INITIATE ANALYSIS</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
                 </form>
               </div>
-            </div>
-          )}
-        </div>
+            )}
 
-        {/* Gaming-style footer with watermark */}
-        <div className="text-center mt-16 pb-8">
-          <div className="max-w-4xl mx-auto space-y-6">
-            {/* Main footer content */}
-            <div className="bg-gradient-to-r from-gray-900/50 to-black/50 backdrop-blur-xl rounded-2xl border border-gray-600/30 p-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
-                {/* Tech stack */}
-                <div className="flex items-center justify-center space-x-2 text-gray-400">
-                  <span className="text-xl">⚡</span>
-                  <span className="text-sm">Powered by XGBoost AI</span>
-                </div>
-                
-                {/* Security */}
-                <div className="flex items-center justify-center space-x-2 text-gray-400">
-                  <span className="text-xl">🔒</span>
-                  <span className="text-sm">Secure & Private</span>
-                </div>
-                
-                {/* Performance */}
-                <div className="flex items-center justify-center space-x-2 text-gray-400">
-                  <span className="text-xl">🚀</span>
-                  <span className="text-sm">Real-time Predictions</span>
                 </div>
               </div>
-            </div>
 
-            {/* Watermark section */}
-            <div className="bg-gradient-to-r from-cyan-500/10 to-blue-500/10 backdrop-blur-sm rounded-xl border border-cyan-500/20 p-6">
-              <div className="flex flex-col items-center text-center space-y-3">
-                <div className="text-3xl animate-pulse">❤️</div>
-                <div>
-                  <h3 className="text-cyan-200 font-bold text-2xl tracking-wide">Heart Disease Predictor</h3>
-                  <p className="text-gray-300 text-sm mt-1">Advanced ML-powered health analysis</p>
+              {/* RIGHT PANEL — Confidence Builder */}
+              <aside className="hidden lg:block">
+                <div className="sticky top-28 space-y-4">
+                  <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+                    <div className="text-xs font-semibold text-gray-900 tracking-wide">Quick Facts</div>
+                    <div className="mt-4 space-y-3">
+                      <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+                        <div className="text-sm font-medium text-gray-700">13 clinical inputs</div>
+                        <div className="text-sm font-semibold text-gray-900">13</div>
+                      </div>
+                      <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+                        <div className="text-sm font-medium text-gray-700">AI-powered analysis</div>
+                        <div className="text-sm font-semibold text-gray-900">XGBoost</div>
+                      </div>
+                      <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+                        <div className="text-sm font-medium text-gray-700">Takes &lt; 2 minutes</div>
+                        <div className="text-sm font-semibold text-gray-900">~2 min</div>
+                      </div>
+                      {!prediction && (
+                        <div className="pt-1 text-sm text-gray-600">Calm, step-by-step. You’ve got this.</div>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
+              </aside>
             </div>
-
-            {/* Disclaimer */}
-            <div className="bg-amber-500/10 backdrop-blur-sm rounded-lg border border-amber-500/20 p-3">
-              <p className="text-amber-300 text-xs text-center flex items-center justify-center space-x-2">
-                <span>⚠️</span>
-                <span>
-                  <strong>Medical Disclaimer:</strong> This tool is for educational purposes only. 
-                  Always consult healthcare professionals for medical decisions.
-                </span>
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => window.open('https://github.com/hemanthsankar0007', '_blank')}
-              className="w-full text-center text-blue-300 font-semibold tracking-wide hover:text-blue-200 transition-colors"
-            >
-              2025 © Developed by Hemanth Sankar
-            </button>
           </div>
-        </div>
-      </div>
+        </main>
 
-      <style jsx>{`
-        @keyframes slideIn {
-          from { opacity: 0; transform: translateY(30px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes shake {
-          0%, 100% { transform: translateX(0); }
-          25% { transform: translateX(-5px); }
-          75% { transform: translateX(5px); }
-        }
-        .animate-slideIn { animation: slideIn 0.6s ease-out; }
-        .animate-shake { animation: shake 0.5s ease-in-out; }
-      `}</style>
-    </div>
-  );
-}
+        {/* Footer (always visible, not sticky) */}
+        <footer className="mt-8 px-6 pb-10">
+          <div className="max-w-7xl mx-auto">
+            <p className="text-center text-base text-gray-600">
+              <a
+                href="https://github.com/hemanthsankar0007/Heart-Disease-Predictor-Updated"
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium hover:text-gray-800"
+              >
+                Developed by Hemanth Sankar
+              </a>
+            </p>
+          </div>
+        </footer>
+      </div>
+    );
+  }
 
 export default App;
